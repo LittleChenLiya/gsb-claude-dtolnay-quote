@@ -111,6 +111,7 @@ extern crate proc_macro;
 mod ext;
 mod format;
 mod ident_fragment;
+pub mod observe;
 mod to_tokens;
 
 // Not public API.
@@ -120,6 +121,10 @@ pub mod __private;
 
 pub use crate::ext::TokenStreamExt;
 pub use crate::ident_fragment::IdentFragment;
+pub use crate::observe::{
+    FragmentRecord, FragmentStatus, GroupRecord, ObservedStream, Observer, RecordingObserver,
+    SourceId, TokenRange,
+};
 pub use crate::to_tokens::ToTokens;
 
 // Not public API.

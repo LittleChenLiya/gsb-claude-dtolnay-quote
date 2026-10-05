@@ -1,0 +1,10 @@
+# Local cargo commands for working with the quote crate.
+#
+# Run the observer example locally:
+#   cargo observe
+#
+# Run the observer tests locally:
+#   cargo observe-test
+[alias]
+observe = "run --example observe"
+observe-test = "test --test observe"

@@ -254,6 +254,42 @@ fs::write(dest_path, formatted).unwrap();
 
 <br>
 
+## Observing interpolations
+
+The [`quote_observe!`] macro instruments each interpolation fragment with an
+explicit observer. Every `#var` is assigned a unique source id and the range
+of top-level tokens it produces is recorded — the range is measured, not
+guessed from the final string. A custom `ToTokens` is called exactly once per
+fragment, zero-output fragments still receive a receipt, and a fragment that
+panics is recorded as incomplete rather than as a complete stream.
+
+```rust
+use quote::observe::RecordingObserver;
+use quote::{quote_observe, ToTokens};
+
+let mut observer = RecordingObserver::new();
+let a = /* ... */;
+let b = /* ... */; // produces no tokens
+let c = /* ... */;
+
+let tokens = quote_observe! { &mut observer=> #a #b #c };
+
+for fragment in &observer.fragments {
+    println!("id={} range={}..{}", fragment.id.index(), fragment.range.start, fragment.range.end);
+}
+```
+
+Nested `Group` tokens are located separately from the fragment's outer range,
+and the punctuation spacing of template tokens is preserved. The default
+[`quote!`] path is unchanged.
+
+Run the example locally with `cargo run --example observe` (or `cargo
+observe` using the cargo alias in `.cargo/config.toml`).
+
+[`quote_observe!`]: https://docs.rs/quote/1.0/quote/macro.quote_observe.html
+
+<br>
+
 #### License
 
 <sup>

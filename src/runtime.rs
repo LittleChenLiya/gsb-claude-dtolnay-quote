@@ -20,6 +20,9 @@ pub type Span = proc_macro2::Span;
 pub type TokenStream = proc_macro2::TokenStream;
 
 #[doc(hidden)]
+pub use crate::observe;
+
+#[doc(hidden)]
 pub struct HasIterator<const B: bool>;
 
 impl BitOr<HasIterator<false>> for HasIterator<false> {
