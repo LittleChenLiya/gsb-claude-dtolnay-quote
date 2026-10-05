@@ -111,6 +111,7 @@ extern crate proc_macro;
 mod ext;
 mod format;
 mod ident_fragment;
+pub mod observe;
 mod to_tokens;
 
 // Not public API.
