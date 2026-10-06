@@ -627,9 +627,96 @@ macro_rules! quote_spanned {
     }};
 }
 
+/// Like `quote!`, but interpolates two sequences of equal length in lockstep,
+/// checking their lengths up front.
+///
+/// <br>
+///
+/// # Syntax
+///
+/// ```text
+/// quote_zip!(a = expr_a, b = expr_b; template)
+/// ```
+///
+/// Two binding names `a` and `b` are introduced for the two sequence
+/// expressions, and the `quote!`-style template that follows the `;` may
+/// interpolate them with the usual `#a` / `#b` and `#(...)*` repetition
+/// syntax.
+///
+/// The two expressions must be replayable sequences with a definite length:
+/// slices, arrays, [`Vec`], or [`BTreeSet`] (or references to these). One-shot
+/// iterators are rejected at compile time; `quote_zip!` does not buffer them.
+/// If the two lengths differ, the macro panics with a descriptive message
+/// instead of silently truncating the longer sequence the way `zip` or an
+/// ordinary `quote!` repetition would.
+///
+/// [`Vec`]: https://doc.rust-lang.org/alloc/vec/struct.Vec.html
+/// [`BTreeSet`]: https://doc.rust-lang.org/alloc/collections/btree_set/struct.BTreeSet.html
+///
+/// Separators behave exactly as in `quote!`: a separator is emitted only
+/// between actual items, so an empty pair of sequences produces no output and
+/// in particular no trailing separator.
+///
+/// The plain [`quote!`] macro is unaffected and keeps its original behavior.
+///
+/// <br>
+///
+/// # Example
+///
+/// ```
+/// # use proc_macro2::{Ident, Span};
+/// # use quote::quote_zip;
+/// #
+/// let names = ["width", "height", "depth"]
+///     .map(|name| Ident::new(name, Span::call_site()));
+/// let values = [3u32, 4, 5];
+///
+/// let tokens = quote_zip! {
+///     names = names,
+///     values = values;
+///     fn dims() { #(#names = #values;)* }
+/// };
+///
+/// assert_eq!(
+///     tokens.to_string(),
+///     "fn dims () { width = 3u32 ; height = 4u32 ; depth = 5u32 ; }",
+/// );
+/// ```
+///
+/// A length mismatch is an error, not a silent truncation:
+///
+/// ```should_panic(expected = "quote_zip! requires two sequences of equal length, got 3 and 2")
+/// # use proc_macro2::{Ident, Span};
+/// # use quote::quote_zip;
+/// #
+/// let names = ["a", "b", "c"].map(|name| Ident::new(name, Span::call_site()));
+/// let values = [1u32, 2];
+///
+/// // Panics: the two sequences have different lengths.
+/// let tokens = quote_zip! {
+///     names = names,
+///     values = values;
+///     #(#names = #values),*
+/// };
+/// ```
+#[macro_export]
+macro_rules! quote_zip {
+    ($a:ident = $ae:expr, $b:ident = $be:expr; $($tt:tt)*) => {{
+        let $a = $ae;
+        let $b = $be;
+        let _len_a = $crate::__private::RepLen::quote_len(&$a);
+        let _len_b = $crate::__private::RepLen::quote_len(&$b);
+        if _len_a != _len_b {
+            $crate::__private::rep_len_mismatch(_len_a, _len_b);
+        }
+        $crate::quote!($($tt)*)
+    }};
+}
+
 // We want to ensure that `get_span` only gets called for the actual user
 // invocation and not for recursive calls from groups, which will call this
 // inner macro instead.
+
 #[macro_export]
 #[doc(hidden)]
 macro_rules! quote_spanned_with_expanded_span {

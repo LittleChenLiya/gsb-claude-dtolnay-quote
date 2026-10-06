@@ -173,6 +173,65 @@ pub mod ext {
     }
 }
 
+/// Length check support for the `quote_zip!` macro.
+///
+/// This trait is only implemented for replayable collections with a definite
+/// length: slices, arrays, `Vec`, and `BTreeSet` (and references to these).
+/// One-shot iterators intentionally do not implement it, so `quote_zip!`
+/// rejects them at compile time rather than silently buffering or truncating
+/// them.
+#[doc(hidden)]
+pub trait RepLen {
+    fn quote_len(&self) -> usize;
+}
+
+impl<T: RepLen + ?Sized> RepLen for &T {
+    fn quote_len(&self) -> usize {
+        <T as RepLen>::quote_len(*self)
+    }
+}
+
+impl<T: RepLen + ?Sized> RepLen for &mut T {
+    fn quote_len(&self) -> usize {
+        <T as RepLen>::quote_len(*self)
+    }
+}
+
+impl<T> RepLen for [T] {
+    fn quote_len(&self) -> usize {
+        self.len()
+    }
+}
+
+impl<T, const N: usize> RepLen for [T; N] {
+    fn quote_len(&self) -> usize {
+        N
+    }
+}
+
+impl<T> RepLen for alloc::vec::Vec<T> {
+    fn quote_len(&self) -> usize {
+        self.len()
+    }
+}
+
+impl<T> RepLen for alloc::collections::btree_set::BTreeSet<T> {
+    fn quote_len(&self) -> usize {
+        self.len()
+    }
+}
+
+// Panics with a descriptive message when the two sequences given to
+// `quote_zip!` do not have the same length. Never returns.
+#[doc(hidden)]
+#[cold]
+pub fn rep_len_mismatch(len_a: usize, len_b: usize) -> ! {
+    panic!(
+        "quote_zip! requires two sequences of equal length, got {} and {}",
+        len_a, len_b
+    );
+}
+
 // Helper type used within interpolations to allow for repeated binding names.
 // Implements the relevant traits, and exports a dummy `next()` method.
 #[derive(Copy, Clone)]
