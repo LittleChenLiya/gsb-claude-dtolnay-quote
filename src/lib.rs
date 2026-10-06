@@ -627,6 +627,137 @@ macro_rules! quote_spanned {
     }};
 }
 
+/// Repetition over two sequences of equal length, with a length check.
+///
+/// This is a companion to the `#(...)*` repetition of [`quote!`] for the
+/// common case of zipping exactly two sequences element by element. Unlike
+/// `Iterator::zip`, a length mismatch is a hard error instead of silently
+/// truncating the longer sequence.
+///
+/// Both interpolated variables must be replayable sequences with a definite
+/// length: a slice, array, `Vec`, `BTreeSet`, or a reference to one of these.
+/// One-shot iterators without a known exact length are not accepted. The
+/// original [`quote!`] macro is unaffected by this addition.
+///
+/// <br>
+///
+/// # Syntax
+///
+/// ```text
+/// quote_paired!((a, b) => #( ... #a ... #b ... ),*)
+/// quote_paired!((a, b) => #( ... #a ... #b ... )*)
+/// ```
+///
+/// The two variables are named up front, followed by `=>` and a repetition
+/// body of the same shape as in [`quote!`], with an optional separator token
+/// before the `*`. As in [`quote!`], the named variables are the sequences in
+/// scope and are interpolated with `#var` inside the body. The separator is
+/// emitted only between actual items, so an empty pair of sequences produces
+/// no tokens and no separator at all.
+///
+/// <br>
+///
+/// # Examples
+///
+/// Pairing two sequences element by element:
+///
+/// ```
+/// # use proc_macro2::{Ident, Span};
+/// # use quote::quote_paired;
+/// #
+/// let fields = vec![
+///     Ident::new("a", Span::call_site()),
+///     Ident::new("b", Span::call_site()),
+///     Ident::new("c", Span::call_site()),
+/// ];
+/// let values = vec![1u8, 2u8, 3u8];
+///
+/// let tokens = quote_paired!((fields, values) => #(let #fields = #values;)*);
+/// assert_eq!(tokens.to_string(), "let a = 1u8 ; let b = 2u8 ; let c = 3u8 ;");
+/// ```
+///
+/// The separator appears only between actual items, never trailing, and empty
+/// sequences produce no separator at all:
+///
+/// ```
+/// # use proc_macro2::{Ident, Span};
+/// # use quote::quote_paired;
+/// #
+/// let names = vec![Ident::new("x", Span::call_site()), Ident::new("y", Span::call_site())];
+/// let types = vec![Ident::new("u8", Span::call_site()), Ident::new("u16", Span::call_site())];
+///
+/// let tokens = quote_paired!((names, types) => #(#names: #types),*);
+/// assert_eq!(tokens.to_string(), "x : u8 , y : u16");
+///
+/// let no_names: Vec<Ident> = Vec::new();
+/// let no_types: Vec<Ident> = Vec::new();
+/// let empty = quote_paired!((no_names, no_types) => #(#no_names: #no_types),*);
+/// assert!(empty.is_empty());
+/// ```
+///
+/// Sequences of different lengths are rejected rather than truncated:
+///
+/// ```should_panic
+/// # use quote::quote_paired;
+/// #
+/// let three = vec![1u8, 2, 3];
+/// let two = vec![10u8, 20];
+///
+/// // Panics: the two sequences have lengths 3 and 2.
+/// let _ = quote_paired!((three, two) => #(#three #two)*);
+/// ```
+#[macro_export]
+macro_rules! quote_paired {
+    // Repetition without a separator.
+    (($a:ident, $b:ident) => # ( $($inner:tt)* ) *) => {{
+        use $crate::__private::ext::*;
+        let mut _s = $crate::__private::TokenStream::new();
+        let (mut $a, _) = $a.quote_into_iter();
+        let (mut $b, _) = $b.quote_into_iter();
+        $crate::__private::check_same_length(&$a, &$b);
+        // This is `while true` instead of `loop` for the same reason as in
+        // the `quote!` repetition: it avoids unreachable code warnings.
+        while true {
+            let $a = match $a.next() {
+                Some(_x) => $crate::__private::RepInterp(_x),
+                None => break,
+            };
+            let $b = match $b.next() {
+                Some(_x) => $crate::__private::RepInterp(_x),
+                None => break,
+            };
+            $crate::quote_each_token!{_s $($inner)*}
+        }
+        _s
+    }};
+
+    // Repetition with a separator, emitted only between actual items.
+    (($a:ident, $b:ident) => # ( $($inner:tt)* ) $sep:tt *) => {{
+        use $crate::__private::ext::*;
+        let mut _s = $crate::__private::TokenStream::new();
+        let (mut $a, _) = $a.quote_into_iter();
+        let (mut $b, _) = $b.quote_into_iter();
+        $crate::__private::check_same_length(&$a, &$b);
+        let mut _first = true;
+        while true {
+            let $a = match $a.next() {
+                Some(_x) => $crate::__private::RepInterp(_x),
+                None => break,
+            };
+            let $b = match $b.next() {
+                Some(_x) => $crate::__private::RepInterp(_x),
+                None => break,
+            };
+            if !_first {
+                $crate::quote_token!{$sep _s}
+            }
+            _first = false;
+            $crate::quote_each_token!{_s $($inner)*}
+        }
+        _s
+    }};
+}
+
 // We want to ensure that `get_span` only gets called for the actual user
 // invocation and not for recursive calls from groups, which will call this
 // inner macro instead.

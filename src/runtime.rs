@@ -173,6 +173,26 @@ pub mod ext {
     }
 }
 
+// Runtime check used by the `quote_paired!` macro. Both operands are required
+// to be iterators with a known exact length, which is what restricts the
+// macro to replayable sequences of definite length (slices, arrays, `Vec`,
+// `BTreeSet`, ...) rather than arbitrary one-shot iterators. A length
+// mismatch is a hard error instead of a silent `zip`-style truncation.
+#[doc(hidden)]
+pub fn check_same_length<A, B>(a: &A, b: &B)
+where
+    A: ExactSizeIterator + ?Sized,
+    B: ExactSizeIterator + ?Sized,
+{
+    let a_len = ExactSizeIterator::len(a);
+    let b_len = ExactSizeIterator::len(b);
+    assert!(
+        a_len == b_len,
+        "quote_paired! requires two sequences of the same length, \
+         got lengths {a_len} and {b_len}",
+    );
+}
+
 // Helper type used within interpolations to allow for repeated binding names.
 // Implements the relevant traits, and exports a dummy `next()` method.
 #[derive(Copy, Clone)]
