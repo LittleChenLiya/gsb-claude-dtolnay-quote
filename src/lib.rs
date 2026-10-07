@@ -109,6 +109,7 @@ extern crate std;
 extern crate proc_macro;
 
 mod ext;
+mod fallible;
 mod format;
 mod ident_fragment;
 mod to_tokens;
@@ -119,6 +120,7 @@ mod to_tokens;
 pub mod __private;
 
 pub use crate::ext::TokenStreamExt;
+pub use crate::fallible::{try_join_tokens, JoinFailure};
 pub use crate::ident_fragment::IdentFragment;
 pub use crate::to_tokens::ToTokens;
 
