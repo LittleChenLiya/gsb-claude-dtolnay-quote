@@ -110,6 +110,7 @@ extern crate proc_macro;
 
 mod ext;
 mod format;
+mod group_wrap;
 mod ident_fragment;
 mod to_tokens;
 
@@ -119,6 +120,7 @@ mod to_tokens;
 pub mod __private;
 
 pub use crate::ext::TokenStreamExt;
+pub use crate::group_wrap::{ContentSpanPolicy, GroupWrap};
 pub use crate::ident_fragment::IdentFragment;
 pub use crate::to_tokens::ToTokens;
 

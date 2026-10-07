@@ -8,8 +8,8 @@
 
 extern crate proc_macro;
 
-use proc_macro2::{Delimiter, Group, Ident, Span, TokenStream};
-use quote::{format_ident, quote, quote_spanned, TokenStreamExt};
+use proc_macro2::{Delimiter, Group, Ident, Span, TokenStream, TokenTree};
+use quote::{format_ident, quote, quote_spanned, ContentSpanPolicy, GroupWrap, TokenStreamExt};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::ffi::{CStr, CString};
@@ -572,4 +572,203 @@ fn test_type_inference_for_span() {
         let proc_macro_span = proc_macro::Span::call_site();
         let _ = quote_spanned!(proc_macro_span.into()=> ...);
     }
+}
+
+// A parsed token stream whose single token carries its own source text as
+// its span, used as a second span source next to `Span::call_site()`.
+fn parsed_span(source: &str) -> Span {
+    source
+        .parse::<TokenStream>()
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+        .span()
+}
+
+#[test]
+fn test_group_wrap_nested_spans() {
+    // Content span source #1: an interpolated variable parsed from a string
+    // keeps its own span.
+    let var: TokenStream = "source_var".parse().unwrap();
+    let var_span = var.clone().into_iter().next().unwrap().span();
+    assert_eq!(var_span.source_text().as_deref(), Some("source_var"));
+
+    // Span source #2: a synthetic span for the delimiter of the new outer
+    // group, from an unrelated source.
+    let synthetic_span = parsed_span("synthetic_delim");
+    assert_eq!(
+        synthetic_span.source_text().as_deref(),
+        Some("synthetic_delim")
+    );
+
+    // Fragment containing an existing parenthesized group, a transparent
+    // None-delimited group, and the interpolated variable.
+    let transparent = Group::new(Delimiter::None, quote!(#var));
+    let fragment = quote! {
+        let x = (#var);
+        #transparent
+    };
+
+    let wrapped = GroupWrap::new(
+        Delimiter::Brace,
+        synthetic_span,
+        ContentSpanPolicy::Preserve,
+        fragment,
+    );
+    assert_eq!(wrapped.delimiter(), Delimiter::Brace);
+    assert_eq!(wrapped.content_span_policy(), ContentSpanPolicy::Preserve);
+
+    // The wrapper is an ordinary interpolated value in the quote! data flow.
+    let tokens = quote!(#wrapped);
+
+    let mut top = tokens.into_iter();
+    let outer = match top.next() {
+        Some(TokenTree::Group(group)) => group,
+        other => panic!("expected a single group, got {:?}", other),
+    };
+    assert!(top.next().is_none());
+
+    // New outer group: requested delimiter, synthetic delimiter span.
+    assert_eq!(outer.delimiter(), Delimiter::Brace);
+    assert_eq!(
+        outer.span().source_text().as_deref(),
+        Some("synthetic_delim")
+    );
+
+    let inner: Vec<TokenTree> = outer.stream().into_iter().collect();
+    assert_eq!(inner.len(), 6);
+
+    // Ordinary quoted tokens keep their call_site span: the wrapper did not
+    // respan the content. call_site spans have no source text.
+    for tt in &[&inner[0], &inner[1], &inner[2], &inner[4]] {
+        assert_eq!(tt.span().source_text(), None);
+    }
+
+    // The pre-existing group keeps its delimiter and its own span.
+    let parens = match &inner[3] {
+        TokenTree::Group(group) => group,
+        other => panic!("expected group, got {:?}", other),
+    };
+    assert_eq!(parens.delimiter(), Delimiter::Parenthesis);
+    assert_eq!(parens.span().source_text(), None);
+
+    // The variable inside keeps its original span source.
+    let mut parens_inner = parens.stream().into_iter();
+    let var_tt = parens_inner.next().unwrap();
+    assert_eq!(var_tt.span().source_text().as_deref(), Some("source_var"));
+    assert!(parens_inner.next().is_none());
+
+    // The None-delimited group keeps its transparent boundary and own span.
+    let none_group = match &inner[5] {
+        TokenTree::Group(group) => group,
+        other => panic!("expected group, got {:?}", other),
+    };
+    assert_eq!(none_group.delimiter(), Delimiter::None);
+    assert_eq!(none_group.span().source_text(), None);
+    let mut none_inner = none_group.stream().into_iter();
+    let var_tt = none_inner.next().unwrap();
+    assert_eq!(var_tt.span().source_text().as_deref(), Some("source_var"));
+    assert!(none_inner.next().is_none());
+}
+
+#[test]
+fn test_group_wrap_empty_fragment() {
+    let synthetic_span = parsed_span("synthetic_delim");
+
+    // Wrapping an empty fragment still emits the outer group with the
+    // synthetic delimiter span.
+    let wrapped = GroupWrap::new(
+        Delimiter::Parenthesis,
+        synthetic_span,
+        ContentSpanPolicy::Preserve,
+        TokenStream::new(),
+    );
+    let tokens = quote!(#wrapped);
+    assert_eq!(tokens.to_string(), "()");
+
+    let mut top = tokens.into_iter();
+    let outer = match top.next() {
+        Some(TokenTree::Group(group)) => group,
+        other => panic!("expected a single group, got {:?}", other),
+    };
+    assert!(top.next().is_none());
+    assert_eq!(outer.delimiter(), Delimiter::Parenthesis);
+    assert_eq!(
+        outer.span().source_text().as_deref(),
+        Some("synthetic_delim")
+    );
+    assert!(outer.stream().is_empty());
+
+    // An empty transparent wrapper stays invisible in the token stream.
+    let transparent = GroupWrap::new(
+        Delimiter::None,
+        synthetic_span,
+        ContentSpanPolicy::Preserve,
+        TokenStream::new(),
+    );
+    let tokens = quote!(a #transparent b);
+    assert_eq!(tokens.to_string(), "a  b");
+}
+
+// Short regression for the pre-existing interface: plain `quote!` and
+// `quote_spanned!` groups follow the same span split that `GroupWrap`
+// exposes, and the token output matches.
+#[test]
+fn test_group_wrap_quote_regression() {
+    let var: TokenStream = "source_var".parse().unwrap();
+    let synthetic_span = parsed_span("synthetic_delim");
+
+    // quote! spans its own groups with call_site and preserves the spans of
+    // interpolated variables.
+    let quoted = quote!({ #var });
+    let quoted_group = match quoted.clone().into_iter().next().unwrap() {
+        TokenTree::Group(group) => group,
+        other => panic!("expected group, got {:?}", other),
+    };
+    assert_eq!(quoted_group.delimiter(), Delimiter::Brace);
+    assert_eq!(quoted_group.span().source_text(), None);
+    let quoted_var = quoted_group.stream().into_iter().next().unwrap();
+    assert_eq!(
+        quoted_var.span().source_text().as_deref(),
+        Some("source_var")
+    );
+
+    // A GroupWrap with a call_site delimiter span reproduces quote!'s group.
+    let wrapped = GroupWrap::new(
+        Delimiter::Brace,
+        Span::call_site(),
+        ContentSpanPolicy::Preserve,
+        quote!(#var),
+    );
+    let wrapped_tokens = quote!(#wrapped);
+    assert_eq!(wrapped_tokens.to_string(), quoted.to_string());
+    let wrapped_group = match wrapped_tokens.into_iter().next().unwrap() {
+        TokenTree::Group(group) => group,
+        other => panic!("expected group, got {:?}", other),
+    };
+    assert_eq!(wrapped_group.delimiter(), quoted_group.delimiter());
+    assert_eq!(wrapped_group.span().source_text(), None);
+    let wrapped_var = wrapped_group.stream().into_iter().next().unwrap();
+    assert_eq!(
+        wrapped_var.span().source_text().as_deref(),
+        Some("source_var")
+    );
+
+    // quote_spanned! applies its span to the group delimiter only, matching
+    // the wrapper's synthetic-delimiter / preserved-content split.
+    let spanned = quote_spanned!(synthetic_span=> (#var));
+    let spanned_group = match spanned.into_iter().next().unwrap() {
+        TokenTree::Group(group) => group,
+        other => panic!("expected group, got {:?}", other),
+    };
+    assert_eq!(
+        spanned_group.span().source_text().as_deref(),
+        Some("synthetic_delim")
+    );
+    let spanned_var = spanned_group.stream().into_iter().next().unwrap();
+    assert_eq!(
+        spanned_var.span().source_text().as_deref(),
+        Some("source_var")
+    );
 }
