@@ -112,6 +112,7 @@ mod ext;
 mod format;
 mod ident_fragment;
 mod to_tokens;
+mod wrap;
 
 // Not public API.
 #[doc(hidden)]
@@ -121,6 +122,7 @@ pub mod __private;
 pub use crate::ext::TokenStreamExt;
 pub use crate::ident_fragment::IdentFragment;
 pub use crate::to_tokens::ToTokens;
+pub use crate::wrap::{ContentSpanPolicy, GroupWrapper};
 
 // Not public API.
 #[doc(hidden)]
@@ -624,6 +626,59 @@ macro_rules! quote_spanned {
     ($span:expr=> $($tt:tt)*) => {{
         let _span: $crate::__private::Span = $crate::__private::get_span($span).__into_span();
         $crate::quote_spanned_with_expanded_span!{_span $($tt)*}
+    }};
+}
+
+/// Quasi-quoting wrapped in a synthetic nested group.
+///
+/// Same as [`quote!`], but the produced fragment is wrapped in a
+/// [`GroupWrapper`]: a synthetic [`Group`] whose delimiter and delimiter span
+/// are specified explicitly, while the content tokens keep the spans they
+/// were produced with (see [`ContentSpanPolicy`]).
+///
+/// [`Group`]: proc_macro2::Group
+///
+/// <br>
+///
+/// # Syntax
+///
+/// A [`Delimiter`], a comma, a span expression of type [`Span`], followed by
+/// `=>`, followed by the tokens to quote. The span expression should be brief
+/// &mdash; use a variable for anything more than a few characters. There
+/// should be no space before the `=>` token.
+///
+/// [`Delimiter`]: proc_macro2::Delimiter
+/// [`Span`]: proc_macro2::Span
+///
+/// ```
+/// # use proc_macro2::{Delimiter, Ident, Span};
+/// # use quote::{quote_group, ToTokens};
+/// #
+/// let ident = Ident::new("answer", Span::call_site());
+/// let wrapped = quote_group!(Delimiter::Brace, Span::call_site()=>
+///     let #ident = 42;
+/// );
+///
+/// // The whole fragment is one group token.
+/// let tokens = wrapped.into_token_stream();
+/// assert_eq!(tokens.to_string(), "{ let answer = 42 ; }");
+/// ```
+///
+/// <br>
+///
+/// # Hygiene
+///
+/// The macro evaluates to a [`GroupWrapper`], which implements [`ToTokens`]
+/// and so can be interpolated into later `quote!` invocations. Groups already
+/// present inside the fragment &mdash; including `Delimiter::None` groups
+/// &mdash; are preserved as they are, and interpolated variables keep the
+/// spans from their own `ToTokens` implementations: the synthetic delimiter
+/// span never overwrites content spans.
+#[macro_export]
+macro_rules! quote_group {
+    ($delimiter:expr, $span:expr=> $($tt:tt)*) => {{
+        let _span: $crate::__private::Span = $crate::__private::get_span($span).__into_span();
+        $crate::GroupWrapper::new($delimiter, _span, $crate::quote!($($tt)*))
     }};
 }
 

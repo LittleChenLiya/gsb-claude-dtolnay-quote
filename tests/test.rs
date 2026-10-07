@@ -8,8 +8,8 @@
 
 extern crate proc_macro;
 
-use proc_macro2::{Delimiter, Group, Ident, Span, TokenStream};
-use quote::{format_ident, quote, quote_spanned, TokenStreamExt};
+use proc_macro2::{Delimiter, Group, Ident, Span, TokenStream, TokenTree};
+use quote::{format_ident, quote, quote_group, quote_spanned, TokenStreamExt};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::ffi::{CStr, CString};
@@ -572,4 +572,28 @@ fn test_type_inference_for_span() {
         let proc_macro_span = proc_macro::Span::call_site();
         let _ = quote_spanned!(proc_macro_span.into()=> ...);
     }
+}
+
+
+// Short regression example for the original interface: the wrapper content
+// goes through the same `quote!` data flow, so both results must line up.
+#[test]
+fn test_quote_group_wrapper() {
+    let x = X;
+    let wrapped = quote_group!(Delimiter::Parenthesis, Span::call_site()=> #x <#x>);
+    let plain = quote!(#x <#x>);
+
+    let mut tokens = quote::ToTokens::into_token_stream(wrapped).into_iter();
+    let Some(TokenTree::Group(group)) = tokens.next() else {
+        panic!("expected a single group token");
+    };
+    assert!(tokens.next().is_none());
+    assert_eq!(group.delimiter(), Delimiter::Parenthesis);
+    assert_eq!(group.stream().to_string(), plain.to_string());
+
+    // ToTokens compatibility: interpolates like any other value.
+    let x = X;
+    let wrapped = quote_group!(Delimiter::Brace, Span::call_site()=> #x);
+    let outer = quote!(impl #wrapped);
+    assert_eq!(outer.to_string(), "impl { X }");
 }
