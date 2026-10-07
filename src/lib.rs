@@ -113,6 +113,9 @@ mod format;
 mod ident_fragment;
 mod to_tokens;
 
+#[cfg(feature = "fallible")]
+mod try_join;
+
 // Not public API.
 #[doc(hidden)]
 #[path = "runtime.rs"]
@@ -121,6 +124,9 @@ pub mod __private;
 pub use crate::ext::TokenStreamExt;
 pub use crate::ident_fragment::IdentFragment;
 pub use crate::to_tokens::ToTokens;
+
+#[cfg(feature = "fallible")]
+pub use crate::try_join::{try_join, try_join_separated, JoinError, TryToTokens, TryTokenStreamExt};
 
 // Not public API.
 #[doc(hidden)]
